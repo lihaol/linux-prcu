@@ -15,6 +15,7 @@
 #include <linux/init_task.h>
 #include <linux/context_tracking.h>
 #include <linux/rcupdate_wait.h>
+#include <linux/prcu.h>
 
 #include <linux/blkdev.h>
 #include <linux/kprobes.h>
@@ -3383,6 +3384,7 @@ static void __sched notrace __schedule(bool preempt)
 
 	local_irq_disable();
 	rcu_note_context_switch(preempt);
+	prcu_note_context_switch();
 
 	/*
 	 * Make sure that signal_pending_state()->signal_pending() below

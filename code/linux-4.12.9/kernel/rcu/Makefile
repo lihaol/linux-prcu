@@ -2,7 +2,7 @@
 # and is generally not a function of system call inputs.
 KCOV_INSTRUMENT := n
 
-obj-y += update.o sync.o
+obj-y += update.o sync.o prcu.o
 obj-$(CONFIG_CLASSIC_SRCU) += srcu.o
 obj-$(CONFIG_TREE_SRCU) += srcutree.o
 obj-$(CONFIG_TINY_SRCU) += srcutiny.o
