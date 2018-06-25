@@ -5,6 +5,7 @@
 #include <linux/types.h>
 #include <linux/mutex.h>
 #include <linux/wait.h>
+#include <linux/completion.h>
 
 #define CONFIG_PRCU
 
@@ -32,6 +33,7 @@ struct prcu_local_struct {
        unsigned int online;
        unsigned long long version;
        unsigned long long cb_version;
+       struct rcu_head barrier_head;
        struct prcu_cblist cblist;
 };
 
@@ -39,8 +41,11 @@ struct prcu_struct {
        atomic64_t global_version;
        atomic64_t cb_version;
        atomic_t active_ctr;
+       atomic_t barrier_cpu_count;
        struct mutex mtx;
+       struct mutex barrier_mtx;
        wait_queue_head_t wait_q;
+       struct completion barrier_completion;
 };
 
 #ifdef CONFIG_PRCU
@@ -48,6 +53,7 @@ void prcu_read_lock(void);
 void prcu_read_unlock(void);
 void synchronize_prcu(void);
 void call_prcu(struct rcu_head *head, rcu_callback_t func);
+void prcu_barrier(void);
 void prcu_init(void);
 void prcu_note_context_switch(void);
 int prcu_pending(void);
@@ -60,6 +66,7 @@ void prcu_check_callbacks(void);
 #define prcu_read_unlock() do {} while (0)
 #define synchronize_prcu() do {} while (0)
 #define call_prcu() do {} while (0)
+#define prcu_barrier() do {} while (0)
 #define prcu_init() do {} while (0)
 #define prcu_note_context_switch() do {} while (0)
 #define prcu_pending() 0

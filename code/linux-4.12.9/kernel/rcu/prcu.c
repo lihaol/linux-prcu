@@ -15,6 +15,7 @@ struct prcu_struct global_prcu = {
        .cb_version = ATOMIC64_INIT(0),
        .active_ctr = ATOMIC_INIT(0),
        .mtx = __MUTEX_INITIALIZER(global_prcu.mtx),
+       .barrier_mtx = __MUTEX_INITIALIZER(global_prcu.barrier_mtx),
        .wait_q = __WAIT_QUEUE_HEAD_INITIALIZER(global_prcu.wait_q)
 };
 struct prcu_struct *prcu = &global_prcu;
@@ -249,6 +250,68 @@ static __latent_entropy void prcu_process_callbacks(struct softirq_action *unuse
        local->cb_version = cb_version;
        local_irq_restore(flags);
 }
+
+/*
+ * PRCU callback function for prcu_barrier().
+ * If we are last, wake up the task executing prcu_barrier().
+ */
+static void prcu_barrier_callback(struct rcu_head *rhp)
+{
+       if (atomic_dec_and_test(&prcu->barrier_cpu_count))
+               complete(&prcu->barrier_completion);
+}
+
+/*
+ * Called with preemption disabled, and from cross-cpu IRQ context.
+ */
+static void prcu_barrier_func(void *info)
+{
+       struct prcu_local_struct *local = this_cpu_ptr(&prcu_local);
+
+       atomic_inc(&prcu->barrier_cpu_count);
+       call_prcu(&local->barrier_head, prcu_barrier_callback);
+}
+
+/* Waiting for all PRCU callbacks to complete. */
+void prcu_barrier(void)
+{
+       int cpu;
+
+       /* Take mutex to serialize concurrent prcu_barrier() requests. */
+       mutex_lock(&prcu->barrier_mtx);
+
+       /*
+        * Initialize the count to one rather than to zero in order to
+        * avoid a too-soon return to zero in case of a short grace period
+        * (or preemption of this task).
+        */
+       init_completion(&prcu->barrier_completion);
+       atomic_set(&prcu->barrier_cpu_count, 1);
+
+       /*
+        * Register a new callback on each CPU using IPI to prevent races
+        * with call_prcu(). When that callback is invoked, we will know
+        * that all of the corresponding CPU's preceding callbacks have
+        * been invoked.
+        */
+       for_each_possible_cpu(cpu)
+               smp_call_function_single(cpu, prcu_barrier_func, NULL, 1);
+
+       /* Decrement the count as we initialize it to one. */
+       if (atomic_dec_and_test(&prcu->barrier_cpu_count))
+               complete(&prcu->barrier_completion);
+
+       /*
+        * Now that we have an prcu_barrier_callback() callback on each
+        * CPU, and thus each counted, remove the initial count.
+        * Wait for all prcu_barrier_callback() callbacks to be invoked.
+        */
+       wait_for_completion(&prcu->barrier_completion);
+
+       /* Other rcu_barrier() invocations can now safely proceed. */
+       mutex_unlock(&prcu->barrier_mtx);
+}
+EXPORT_SYMBOL(prcu_barrier);
 
 void prcu_init_local_struct(int cpu)
 {
