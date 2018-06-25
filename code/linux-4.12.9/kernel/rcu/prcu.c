@@ -179,8 +179,10 @@ void call_prcu(struct rcu_head *head, rcu_callback_t func)
 
        /* Use GFP_ATOMIC with IRQs disabled */
        vhp = kmalloc(sizeof(struct prcu_version_head), GFP_ATOMIC);
-       if (!vhp)
+       if (!vhp) {
+               WARN_ON(1);
                return;
+       }
 
        head->func = func;
        head->next = NULL;
