@@ -38,6 +38,7 @@
 #include <linux/smp.h>
 #include <linux/profile.h>
 #include <linux/rcupdate.h>
+#include <linux/prcu.h>
 #include <linux/moduleparam.h>
 #include <linux/kallsyms.h>
 #include <linux/writeback.h>
@@ -574,6 +575,7 @@ asmlinkage __visible void __init start_kernel(void)
 	workqueue_init_early();
 
 	rcu_init();
+	prcu_init();
 
 	/* Trace events are available after this */
 	trace_init();

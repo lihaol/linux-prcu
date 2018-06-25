@@ -1,10 +1,11 @@
 #include <linux/smp.h>
-#include <linux/prcu.h>
 #include <linux/percpu.h>
-#include <linux/compiler.h>
+#include <linux/prcu.h>
 #include <linux/sched.h>
-
+#include <linux/slab.h>
 #include <asm/barrier.h>
+
+#include "rcu.h"
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct prcu_local_struct, prcu_local);
 
@@ -15,6 +16,16 @@ struct prcu_struct global_prcu = {
        .wait_q = __WAIT_QUEUE_HEAD_INITIALIZER(global_prcu.wait_q)
 };
 struct prcu_struct *prcu = &global_prcu;
+
+/* Initialize simple callback list. */
+static void prcu_cblist_init(struct prcu_cblist *rclp)
+{
+       rclp->head = NULL;
+       rclp->tail = &rclp->head;
+       rclp->version_head = NULL;
+       rclp->version_tail = &rclp->version_head;
+       rclp->len = 0;
+}
 
 static inline void prcu_report(struct prcu_local_struct *local)
 {
@@ -122,4 +133,54 @@ void prcu_note_context_switch(void)
        local->online = 0;
        prcu_report(local);
        put_cpu_ptr(&prcu_local);
+}
+
+void call_prcu(struct rcu_head *head, rcu_callback_t func)
+{
+       unsigned long flags;
+       struct prcu_local_struct *local;
+       struct prcu_cblist *rclp;
+       struct prcu_version_head *vhp;
+
+       debug_rcu_head_queue(head);
+
+       /* Use GFP_ATOMIC with IRQs disabled */
+       vhp = kmalloc(sizeof(struct prcu_version_head), GFP_ATOMIC);
+       if (!vhp)
+               return;
+
+       head->func = func;
+       head->next = NULL;
+       vhp->next = NULL;
+
+       local_irq_save(flags);
+       local = this_cpu_ptr(&prcu_local);
+       vhp->version = local->version;
+       rclp = &local->cblist;
+       rclp->len++;
+       *rclp->tail = head;
+       rclp->tail = &head->next;
+       *rclp->version_tail = vhp;
+       rclp->version_tail = &vhp->next;
+       local_irq_restore(flags);
+}
+EXPORT_SYMBOL(call_prcu);
+
+void prcu_init_local_struct(int cpu)
+{
+       struct prcu_local_struct *local;
+
+       local = per_cpu_ptr(&prcu_local, cpu);
+       local->locked = 0;
+       local->online = 0;
+       local->version = 0;
+       prcu_cblist_init(&local->cblist);
+}
+
+void __init prcu_init(void)
+{
+       int cpu;
+
+       for_each_possible_cpu(cpu)
+               prcu_init_local_struct(cpu);
 }
