@@ -456,6 +456,9 @@ enum
 	SCHED_SOFTIRQ,
 	HRTIMER_SOFTIRQ, /* Unused, but kept as tools rely on the
 			    numbering. Sigh! */
+#ifdef CONFIG_PRCU
+	PRCU_SOFTIRQ,
+#endif
 	RCU_SOFTIRQ,    /* Preferable RCU should always be the last softirq */
 
 	NR_SOFTIRQS

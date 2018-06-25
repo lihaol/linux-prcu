@@ -31,11 +31,13 @@ struct prcu_local_struct {
        unsigned int locked;
        unsigned int online;
        unsigned long long version;
+       unsigned long long cb_version;
        struct prcu_cblist cblist;
 };
 
 struct prcu_struct {
        atomic64_t global_version;
+       atomic64_t cb_version;
        atomic_t active_ctr;
        struct mutex mtx;
        wait_queue_head_t wait_q;
@@ -48,6 +50,9 @@ void synchronize_prcu(void);
 void call_prcu(struct rcu_head *head, rcu_callback_t func);
 void prcu_init(void);
 void prcu_note_context_switch(void);
+int prcu_pending(void);
+void invoke_prcu_core(void);
+void prcu_check_callbacks(void);
 
 #else /* #ifdef CONFIG_PRCU */
 
@@ -57,6 +62,9 @@ void prcu_note_context_switch(void);
 #define call_prcu() do {} while (0)
 #define prcu_init() do {} while (0)
 #define prcu_note_context_switch() do {} while (0)
+#define prcu_pending() 0
+#define invoke_prcu_core() do {} while (0)
+#define prcu_check_callbacks() do {} while (0)
 
 #endif /* #ifdef CONFIG_PRCU */
 #endif /* __LINUX_PRCU_H */

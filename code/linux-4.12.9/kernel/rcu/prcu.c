@@ -1,6 +1,7 @@
 #include <linux/smp.h>
 #include <linux/percpu.h>
 #include <linux/prcu.h>
+#include <linux/interrupt.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <asm/barrier.h>
@@ -11,6 +12,7 @@ DEFINE_PER_CPU_SHARED_ALIGNED(struct prcu_local_struct, prcu_local);
 
 struct prcu_struct global_prcu = {
        .global_version = ATOMIC64_INIT(0),
+       .cb_version = ATOMIC64_INIT(0),
        .active_ctr = ATOMIC_INIT(0),
        .mtx = __MUTEX_INITIALIZER(global_prcu.mtx),
        .wait_q = __WAIT_QUEUE_HEAD_INITIALIZER(global_prcu.wait_q)
@@ -25,6 +27,35 @@ static void prcu_cblist_init(struct prcu_cblist *rclp)
        rclp->version_head = NULL;
        rclp->version_tail = &rclp->version_head;
        rclp->len = 0;
+}
+
+/*
+ * Dequeue the oldest rcu_head structure from the specified callback list;
+ * store the callback grace period version number into the version pointer.
+ */
+static struct rcu_head *prcu_cblist_dequeue(struct prcu_cblist *rclp)
+{
+       struct rcu_head *rhp;
+       struct prcu_version_head *vhp;
+
+       rhp = rclp->head;
+       if (!rhp) {
+               WARN_ON(vhp);
+               WARN_ON(rclp->len);
+               return NULL;
+       }
+
+       vhp = rclp->version_head;
+       rclp->version_head = vhp->next;
+       rclp->head = rhp->next;
+       rclp->len--;
+
+       if (!rclp->head) {
+               rclp->tail = &rclp->head;
+               rclp->version_tail = &rclp->version_head;
+       }
+
+       return rhp;
 }
 
 static inline void prcu_report(struct prcu_local_struct *local)
@@ -117,6 +148,7 @@ void synchronize_prcu(void)
        if (atomic_read(&prcu->active_ctr))
                wait_event(prcu->wait_q, !atomic_read(&prcu->active_ctr));
 
+       atomic64_set(&prcu->cb_version, version);
        mutex_unlock(&prcu->mtx);
 }
 EXPORT_SYMBOL(synchronize_prcu);
@@ -166,6 +198,58 @@ void call_prcu(struct rcu_head *head, rcu_callback_t func)
 }
 EXPORT_SYMBOL(call_prcu);
 
+int prcu_pending(void)
+{
+       struct prcu_local_struct *local = get_cpu_ptr(&prcu_local);
+       unsigned long long cb_version = local->cb_version;
+       struct prcu_cblist *rclp = &local->cblist;
+
+       put_cpu_ptr(&prcu_local);
+       return cb_version < atomic64_read(&prcu->cb_version) && rclp->head;
+}
+
+void invoke_prcu_core(void)
+{
+       if (cpu_online(smp_processor_id()))
+               raise_softirq(PRCU_SOFTIRQ);
+}
+
+void prcu_check_callbacks(void)
+{
+       if (prcu_pending())
+               invoke_prcu_core();
+}
+
+static __latent_entropy void prcu_process_callbacks(struct softirq_action *unused)
+{
+       unsigned long flags;
+       unsigned long long cb_version;
+       struct prcu_local_struct *local;
+       struct prcu_cblist *rclp;
+       struct rcu_head *rhp;
+       struct prcu_version_head *vhp;
+
+       if (cpu_is_offline(smp_processor_id()))
+               return;
+
+       cb_version = atomic64_read(&prcu->cb_version);
+
+       /* Disable interrupts to prevent races with call_prcu() */
+       local_irq_save(flags);
+       local = this_cpu_ptr(&prcu_local);
+       rclp = &local->cblist;
+       rhp = rclp->head;
+       vhp = rclp->version_head;
+       for (; rhp && vhp && vhp->version < cb_version;
+            rhp = rclp->head, vhp = rclp->version_head) {
+               rhp = prcu_cblist_dequeue(rclp);
+               debug_rcu_head_unqueue(rhp);
+               rhp->func(rhp);
+       }
+       local->cb_version = cb_version;
+       local_irq_restore(flags);
+}
+
 void prcu_init_local_struct(int cpu)
 {
        struct prcu_local_struct *local;
@@ -174,6 +258,7 @@ void prcu_init_local_struct(int cpu)
        local->locked = 0;
        local->online = 0;
        local->version = 0;
+       local->cb_version = 0;
        prcu_cblist_init(&local->cblist);
 }
 
@@ -181,6 +266,7 @@ void __init prcu_init(void)
 {
        int cpu;
 
+       open_softirq(PRCU_SOFTIRQ, prcu_process_callbacks);
        for_each_possible_cpu(cpu)
                prcu_init_local_struct(cpu);
 }
