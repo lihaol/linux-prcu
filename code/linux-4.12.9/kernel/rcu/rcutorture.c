@@ -46,6 +46,7 @@
 #include <linux/delay.h>
 #include <linux/stat.h>
 #include <linux/srcu.h>
+#include <linux/prcu.h>
 #include <linux/slab.h>
 #include <linux/trace_clock.h>
 #include <asm/byteorder.h>
@@ -767,6 +768,43 @@ static bool __maybe_unused torturing_tasks(void)
 }
 
 #endif /* #else #ifdef CONFIG_TASKS_RCU */
+
+/*
+ * Definitions for prcu torture testing.
+ */
+
+static int prcu_torture_read_lock(void) __acquires(RCU)
+{
+       prcu_read_lock();
+       return 0;
+}
+
+static void prcu_torture_read_unlock(int idx) __releases(RCU)
+{
+       prcu_read_unlock();
+}
+
+static struct rcu_torture_ops prcu_ops = {
+       .ttype          = PRCU_FLAVOR,
+       .init           = rcu_sync_torture_init,
+       .readlock       = prcu_torture_read_lock,
+       .read_delay     = rcu_read_delay,  /* just reuse rcu's version. */
+       .readunlock     = prcu_torture_read_unlock,
+       .started        = rcu_no_completed,
+       .completed      = rcu_no_completed,
+       .deferred_free  = NULL,
+       .sync           = synchronize_prcu,
+       .exp_sync       = synchronize_prcu,
+       .get_state      = NULL,
+       .cond_sync      = NULL,
+       .call           = NULL,
+       .cb_barrier     = NULL,
+       .fqs            = NULL,
+       .stats          = NULL,
+       .irq_capable    = 1,
+       .can_boost      = 0,
+       .name           = "prcu"
+};
 
 /*
  * RCU torture priority-boost testing.  Runs one real-time thread per
@@ -1764,7 +1802,7 @@ rcu_torture_init(void)
 	int firsterr = 0;
 	static struct rcu_torture_ops *torture_ops[] = {
 		&rcu_ops, &rcu_bh_ops, &rcu_busted_ops, &srcu_ops, &srcud_ops,
-		&sched_ops, RCUTORTURE_TASKS_OPS
+		&sched_ops, &prcu_ops, RCUTORTURE_TASKS_OPS
 	};
 
 	if (!torture_init_begin(torture_type, verbose, &torture_runnable))
