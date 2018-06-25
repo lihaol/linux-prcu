@@ -565,6 +565,13 @@ config TASKS_RCU
 	  only voluntary context switch (not preemption!), idle, and
 	  user-mode execution as quiescent states.
 
+config PRCU
+       bool
+       default y
+       help
+         This option selects the PRCU implementation based on a fast
+         consensus protocol.
+
 config RCU_STALL_COMMON
 	def_bool ( TREE_RCU || PREEMPT_RCU || RCU_TRACE )
 	help

@@ -7,8 +7,7 @@
 #include <linux/wait.h>
 #include <linux/completion.h>
 
-#define CONFIG_PRCU
-
+#ifdef CONFIG_PRCU
 struct prcu_version_head {
        unsigned long long version;
        struct prcu_version_head *next;
@@ -48,7 +47,6 @@ struct prcu_struct {
        struct completion barrier_completion;
 };
 
-#ifdef CONFIG_PRCU
 void prcu_read_lock(void);
 void prcu_read_unlock(void);
 void synchronize_prcu(void);
@@ -62,11 +60,11 @@ void prcu_check_callbacks(void);
 
 #else /* #ifdef CONFIG_PRCU */
 
-#define prcu_read_lock() do {} while (0)
-#define prcu_read_unlock() do {} while (0)
-#define synchronize_prcu() do {} while (0)
-#define call_prcu() do {} while (0)
-#define prcu_barrier() do {} while (0)
+#define prcu_read_lock rcu_read_lock
+#define prcu_read_unlock rcu_read_unlock
+#define synchronize_prcu synchronize_rcu
+#define call_prcu call_rcu
+#define prcu_barrier rcu_barrier
 #define prcu_init() do {} while (0)
 #define prcu_note_context_switch() do {} while (0)
 #define prcu_pending() 0
