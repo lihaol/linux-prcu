@@ -28,6 +28,7 @@
 #include <linux/spinlock.h>
 #include <linux/smp.h>
 #include <linux/rcupdate.h>
+#include <linux/prcu.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
 #include <uapi/linux/sched/types.h>
@@ -305,6 +306,34 @@ static bool __maybe_unused torturing_tasks(void)
 #endif /* #else #ifdef CONFIG_TASKS_RCU */
 
 /*
+ * Definitions for prcu perf testing.
+ */
+
+static int prcu_perf_read_lock(void) __acquires(RCU)
+{
+       prcu_read_lock();
+       return 0;
+}
+
+static void prcu_perf_read_unlock(int idx) __releases(RCU)
+{
+       prcu_read_unlock();
+}
+
+static struct rcu_perf_ops prcu_ops = {
+       .ptype          = PRCU_FLAVOR,
+       .init           = rcu_sync_perf_init,
+       .readlock       = prcu_perf_read_lock,
+       .readunlock     = prcu_perf_read_unlock,
+       .started        = rcu_no_completed,
+       .completed      = rcu_no_completed,
+       .exp_completed  = rcu_no_completed,
+       .sync           = synchronize_prcu,
+       .exp_sync       = synchronize_prcu,
+       .name           = "prcu"
+};
+
+/*
  * If performance tests complete, wait for shutdown to commence.
  */
 static void rcu_perf_wait_shutdown(void)
@@ -554,7 +583,7 @@ rcu_perf_init(void)
 	long i;
 	int firsterr = 0;
 	static struct rcu_perf_ops *perf_ops[] = {
-		&rcu_ops, &rcu_bh_ops, &srcu_ops, &sched_ops,
+		&rcu_ops, &rcu_bh_ops, &srcu_ops, &sched_ops, &prcu_ops,
 		RCUPERF_TASKS_OPS
 	};
 
